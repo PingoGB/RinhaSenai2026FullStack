@@ -1,0 +1,6 @@
+{
+  "team": "nome-do-time",
+  "members": [
+    { "name": "Seu Nome", "github": "@seuuser" }
+  ]
+}

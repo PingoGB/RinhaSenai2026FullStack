@@ -1,0 +1,11 @@
+{
+  "name": "rinha-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test run.js"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0"
+  }
+}

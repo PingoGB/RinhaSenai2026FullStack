@@ -1,0 +1,9 @@
+# Tudo fora de participants/ precisa de aprovacao do code owner
+* @fullzer4
+
+# participants/ e livre para qualquer contribuidor
+/participants/
+
+# Arquivos auto-gerados pelo bot (sem owner = sem review obrigatorio)
+/LEADERBOARD.md
+/RESULTS.md

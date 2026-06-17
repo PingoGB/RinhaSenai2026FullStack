@@ -1,0 +1,177 @@
+name: PR Bench
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Generate App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Detect team
+        id: team
+        run: |
+          for dir in participants/*/; do
+            if [ -d "$dir" ] && [ -f "$dir/package.json" ]; then
+              TEAM=$(basename "$dir")
+              echo "team=$TEAM" >> "$GITHUB_OUTPUT"
+              echo "dir=participants/$TEAM" >> "$GITHUB_OUTPUT"
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "Team: $TEAM"
+              exit 0
+            fi
+          done
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install participant
+        if: steps.team.outputs.skip != 'true'
+        working-directory: ${{ steps.team.outputs.dir }}
+        run: |
+          rm -f data.db data.db-*
+          npm install
+          npm run build
+
+      - name: Install tests (Playwright)
+        if: steps.team.outputs.skip != 'true'
+        working-directory: tests
+        run: |
+          npm install
+          npx playwright install chromium --with-deps
+
+      - name: Start server
+        if: steps.team.outputs.skip != 'true'
+        working-directory: ${{ steps.team.outputs.dir }}
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/api/health > /dev/null 2>&1 && echo "Server ready" && exit 0
+            sleep 1
+          done
+          echo "::error::Server timeout" && exit 1
+
+      - name: Run tests
+        id: bench
+        if: steps.team.outputs.skip != 'true'
+        continue-on-error: true
+        run: node --test tests/run.js
+
+      - name: Post results
+        if: steps.team.outputs.skip != 'true' && steps.app-token.outputs.token && always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const team = '${{ steps.team.outputs.team }}';
+
+            let results;
+            try {
+              results = JSON.parse(fs.readFileSync('tests/results.json', 'utf8'));
+            } catch {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `## ❌ Testes falharam: ${team}\n\nOs testes nao conseguiram gerar resultados. Verifique os logs.`
+              });
+              return;
+            }
+
+            const { pass, fail, total } = results.summary;
+            const scoring = results.scoring || {};
+            const metrics = results.metrics || {};
+            const status = fail === 0 ? '✅' : '⚠️';
+            const totalScore = scoring.total || 0;
+
+            function renderCategory(title, items, scoreInfo) {
+              if (!items || items.length === 0) return '';
+              const failing = items.filter(t => !t.ok);
+              const passing = items.filter(t => t.ok);
+              const scoreLabel = scoreInfo ? ` (${scoreInfo.score}/${scoreInfo.max} pts)` : '';
+
+              let md = `\n### ${title}${scoreLabel}\n\n`;
+
+              if (failing.length > 0) {
+                md += `**❌ Falhas (${failing.length}):**\n`;
+                for (const t of failing) {
+                  md += `- ❌ ${t.name}`;
+                  if (t.detail) md += ` — \`${t.detail}\``;
+                  md += '\n';
+                }
+                md += '\n';
+              }
+
+              if (passing.length > 0 && failing.length > 0) {
+                md += `<details>\n<summary>✅ ${passing.length} testes passando</summary>\n\n`;
+                for (const t of passing) md += `- ✅ ${t.name}\n`;
+                md += `\n</details>\n`;
+              } else if (passing.length > 0) {
+                md += `<details>\n<summary>✅ ${passing.length}/${items.length} testes passando</summary>\n\n`;
+                for (const t of passing) {
+                  md += `- ✅ ${t.name}`;
+                  if (t.detail) md += ` *(${t.detail})*`;
+                  md += '\n';
+                }
+                md += `\n</details>\n`;
+              }
+              return md;
+            }
+
+            let body = `## ${status} Resultado: ${team}\n\n`;
+            body += `### Pontuacao: **${totalScore}/100**\n\n`;
+            body += `| Categoria | Testes | Pontos |\n`;
+            body += `|-----------|--------|--------|\n`;
+            body += `| Regras de negocio | ${scoring.rules?.pass || 0}/${scoring.rules?.total || 0} | **${scoring.rules?.score || 0}/50** |\n`;
+            body += `| Frontend (Playwright) | ${scoring.frontend?.pass || 0}/${scoring.frontend?.total || 0} | **${scoring.frontend?.score || 0}/30** |\n`;
+            body += `| Stress test | ${scoring.stress?.pass || 0}/${scoring.stress?.total || 0} | **${scoring.stress?.score || 0}/20** |\n`;
+            body += `| **Total** | **${pass}/${total}** | **${totalScore}/100** |\n`;
+
+            if (metrics.throughput) {
+              body += `\n### Performance\n\n`;
+              body += `| Metrica | Valor |\n`;
+              body += `|---------|-------|\n`;
+              body += `| Throughput | **${metrics.throughput} txn/s** |\n`;
+              body += `| Total | **${metrics.stress_created}/${metrics.stress_total} txns** em ${metrics.stress_elapsed_ms}ms |\n`;
+              body += `| Latencia avg | **${metrics.latency_avg_ms || '-'}ms** |\n`;
+              body += `| Latencia p50 | **${metrics.latency_p50_ms || '-'}ms** |\n`;
+              body += `| Latencia p95 | **${metrics.latency_p95_ms || '-'}ms** |\n`;
+              body += `| Latencia p99 | **${metrics.latency_p99_ms || '-'}ms** |\n`;
+            }
+
+            body += renderCategory('Regras de negocio (API)', results.rules, scoring.rules);
+            body += renderCategory('Frontend (Playwright)', results.frontend, scoring.frontend);
+            body += renderCategory('Stress test', results.stress, scoring.stress);
+            body += `\n---\n> 🤖 Testes automaticos · Rinha FullStack SENAI 2026\n`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+      - name: Fail if tests have errors
+        if: steps.team.outputs.skip != 'true' && steps.bench.outcome != 'success'
+        run: |
+          echo "::error::Testes falharam — merge bloqueado"
+          exit 1
