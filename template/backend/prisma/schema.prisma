@@ -21,7 +21,7 @@ model Transaction {
   feeCents           Int      @map("fee_cents")
   netAmount          Int      @map("net_amount")
   description        String
-  payloadHash        String?  @unique @map("payload_hash")
+  idempotencyKey     String?  @unique @map("idempotency_key")
   createdAt          DateTime @default(now()) @map("created_at")
 
   @@map("transactions")

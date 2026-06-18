@@ -2,8 +2,13 @@ import { join } from 'node:path'
 import Fastify from 'fastify'
 import fastifyStatic from '@fastify/static'
 import routes from './routes/transactions.js'
+import prisma from './db.js'
 
 const app = Fastify({ logger: true })
+
+// Clear all transactions on startup so benchmark always starts fresh
+await prisma.transaction.deleteMany({})
+app.log.info('Database cleared on startup')
 
 app.register(routes, { prefix: '/api' })
 

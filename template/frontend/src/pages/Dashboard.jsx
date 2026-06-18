@@ -135,10 +135,26 @@ export default function Dashboard() {
           )}
         </div>
         <div className="glass-panel stat-card stat-warning">
-          <span className="stat-label">Saldo Pendente (Aprovadas)</span>
+          <span className="stat-label">Total Aprovadas</span>
           {loading ? <span>...</span> : (
             <span className="stat-value display-total-approved" data-value={balance.total_approved}>
               {balance.total_approved}
+            </span>
+          )}
+        </div>
+        <div className="glass-panel stat-card">
+          <span className="stat-label">Total Recusadas</span>
+          {loading ? <span>...</span> : (
+            <span className="stat-value display-total-declined" data-value={balance.total_declined}>
+              {balance.total_declined}
+            </span>
+          )}
+        </div>
+        <div className="glass-panel stat-card">
+          <span className="stat-label">Total Estornadas</span>
+          {loading ? <span>...</span> : (
+            <span className="stat-value display-total-refunded" data-value={balance.total_refunded}>
+              {balance.total_refunded}
             </span>
           )}
         </div>
@@ -232,10 +248,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div style={{ display: 'none' }}>
-         <span className="display-total-declined" data-value={balance.total_declined}>{balance.total_declined}</span>
-         <span className="display-total-refunded" data-value={balance.total_refunded}>{balance.total_refunded}</span>
-      </div>
+
     </div>
   )
 }
